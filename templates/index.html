@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Object Detection in Video using YOLOv5</title>
+    <title>Object Detection in Video or Image using YOLOv5</title>
     <style>
         :root {
             --primary-color: #4a90e2;
@@ -14,6 +14,8 @@
             --success-color: #27ae60;
             --error-color: #e74c3c;
             --accent-color: #f39c12;
+            --disabled-color: #bdc3c7;
+            --streaming-color: #b8e994;
         }
 
         * {
@@ -22,26 +24,75 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
         body {
             font-family: 'Poppins', 'Segoe UI', Arial, sans-serif;
             background: linear-gradient(45deg, #e6ecf0, #dfe9f3);
             color: var(--text-color);
             line-height: 1.6;
-            min-height: 100vh;
-            padding: 50px 20px;
-            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
         }
 
         .container {
-            max-width: 1100px;
-            margin: 0 auto;
-            position: relative;
+            flex: 1;
+            max-width: 100%;
+            max-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-layout {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .left-section {
+            flex: 1;
+            min-width: 300px;
+            max-width: 30%;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            gap: 20px;
+        }
+
+        .right-section {
+            flex: 2;
+            min-width: 400px;
+            display: flex;
+            height: 100%;
+            overflow: auto;
+        }
+
+        .title-block, .upload-form, .video-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(5px);
+            animation: slideUp 0.8s ease;
+            overflow: auto;
+        }
+
+        .title-block {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         h1 {
             text-align: center;
             color: var(--primary-color);
-            margin-bottom: 50px;
             font-weight: 700;
             font-size: 2.5rem;
             letter-spacing: 1px;
@@ -52,25 +103,31 @@
         }
 
         .upload-form {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: var(--shadow);
-            margin-bottom: 50px;
-            backdrop-filter: blur(5px);
-            animation: slideUp 0.8s ease;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .video-section {
+            flex: 1;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
         }
 
         .upload-form form {
             display: flex;
-            gap: 20px;
+            gap: 15px;
             align-items: center;
             justify-content: center;
             flex-wrap: wrap;
         }
 
         .upload-form input[type="file"] {
-            padding: 12px;
+            padding: 10px;
+            font-size: 1rem;
             border: 2px dashed var(--primary-color);
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.8);
@@ -83,14 +140,14 @@
         }
 
         .upload-form input[type="submit"] {
-            padding: 12px 35px;
+            padding: 10px 20px;
+            font-size: 1rem;
             background: var(--primary-color);
             color: white;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            letter-spacing: 1px;
             transition: all 0.3s ease;
             box-shadow: 0 5px 15px rgba(74, 144, 226, 0.4);
         }
@@ -101,83 +158,72 @@
             box-shadow: 0 8px 20px rgba(243, 156, 18, 0.4);
         }
 
-        .video-section {
-            background: rgba(255, 255, 25511, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: var(--shadow);
-            margin-bottom: 50px;
-            backdrop-filter: blur(5px);
-            animation: slideUp 1s ease;
-        }
-
         .video-section h2 {
             color: var(--primary-color);
-            margin-bottom: 25px;
-            font-size: 2rem;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
             font-weight: 600;
             background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
-        #stream, #output-video {
+        .video-container {
             width: 100%;
-            max-width: 100%;
-            height: auto;
+            height: 70%;
+            border: 3px solid var(--primary-color);
             border-radius: 10px;
-            border: 3px solid rgba(74, 144, 226, 0.2);
-            display: none;
-            transition: all 0.5s ease;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            position: relative;
         }
 
-        #stream.active, #output-video.active {
+        #stream, #output-video, #processed-image {
+            width: 100%;
+            height: auto;
+            max-height: 100%;
+            border-radius: 10px;
+            border: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            object-fit: contain;
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #stream.active, #output-video.active, #processed-image.active {
             display: block;
             opacity: 1;
             transform: scale(1.01);
         }
 
-        .processed-image {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: var(--shadow);
-            animation: slideUp 1.2s ease;
-        }
-
-        .processed-image h2 {
-            color: var(--primary-color);
-            margin-bottom: 25px;
-            font-size: 2rem;
-            font-weight: 600;
-            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .processed-image img {
-            width: 100%;
-            max-width: 100%;
-            border-radius: 10px;
-            border: 3px solid rgba(74, 144, 226, 0.2);
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
-        }
-
-        .processed-image img:hover {
+        #processed-image:hover {
             transform: scale(1.02);
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
         }
 
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 15px 0;
+            gap: 10px;
+        }
+
         #status {
-            margin: 25px 0;
-            padding: 15px;
+            flex: 1;
+            padding: 10px;
             background: rgba(233, 236, 239, 0.9);
             border-radius: 10px;
             text-align: center;
             font-weight: 500;
-            font-size: 1.1rem;
+            font-size: 1rem;
             transition: all 0.3s ease;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
@@ -194,12 +240,52 @@
             box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
         }
 
+        #status.streaming {
+            background: var(--streaming-color);
+            color: var(--text-color);
+            box-shadow: 0 5px 15px rgba(184, 233, 148, 0.4);
+        }
+
+        #pause-resume-btn {
+            padding: 10px 20px;
+            font-size: 1rem;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(74, 144, 226, 0.4);
+        }
+
+        #pause-resume-btn:disabled {
+            background: var(--disabled-color);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        #pause-resume-btn:not(:disabled):hover {
+            background: var(--accent-color);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(243, 156, 18, 0.4);
+        }
+
+        #pause-resume-btn.paused {
+            background: var(--secondary-color);
+        }
+
+        #pause-resume-btn.paused:not(:disabled):hover {
+            background: var(--accent-color);
+        }
+
         .placeholder {
             text-align: center;
             color: var(--secondary-color);
-            padding: 50px 0;
+            padding: 20px 0;
             font-style: italic;
-            font-size: 1.2rem;
+            font-size: 1rem;
             opacity: 0.7;
             animation: fadeIn 1.5s ease;
         }
@@ -218,89 +304,248 @@
             from { transform: translateY(-30px); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
         }
+
+        @media (max-width: 900px) {
+            .main-layout {
+                flex-direction: column;
+                height: auto;
+            }
+            .left-section, .right-section {
+                max-width: 100%;
+                height: auto;
+            }
+            .video-section {
+                max-width: 100%;
+                height: auto;
+            }
+            .video-container {
+                height: 50%;
+            }
+            .status-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            #pause-resume-btn {
+                margin: 10px 0;
+            }
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
-        <h1>Object Detection in Video using YOLOv5</h1>
-        
-        <div class="upload-form">
-            <form method="post" enctype="multipart/form-data">
-                <input type="file" name="file" accept="image/*,video/*">
-                <input type="submit" value="Detect">
-            </form>
-        </div>
-
-        <div class="video-section">
-            <h2>Processing Result</h2>
-            <div id="status">Status: Waiting for upload...</div>
-            <img id="stream" src="" alt="Video Stream">
-            <video id="output-video" controls>
-                <source id="video-source" src="" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-            {% if not task_id and not img_data %}
-                <div class="placeholder">Upload a video or image to start detection</div>
-            {% endif %}
-        </div>
-
-        {% if img_data %}
-            <div class="processed-image">
-                <h2>Processed Image</h2>
-                <img src="data:image/png;base64,{{ img_data }}" alt="Processed Image">
+        <div class="main-layout">
+            <div class="left-section">
+                <div class="title-block">
+                    <h1>Object Detection in Video or Image using YOLOv5</h1>
+                </div>
+                <div class="upload-form">
+                    <form id="upload-form" enctype="multipart/form-data" method="post" aria-label="File upload form">
+                        <input type="file" name="file" accept="image/*,video/*" aria-label="Select image or video file">
+                        <input type="submit" value="Detect" aria-label="Start detection">
+                    </form>
+                </div>
             </div>
-        {% endif %}
 
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                const streamImg = document.getElementById('stream');
-                const outputVideo = document.getElementById('output-video');
-                const videoSource = document.getElementById('video-source');
-                const statusDiv = document.getElementById('status');
-
-                {% if task_id %}
-                    streamImg.src = "{{ url_for('stream', task_id=task_id) }}";
-                    streamImg.classList.add('active');
-                    statusDiv.textContent = 'Status: Processing...';
-
-                    streamImg.onerror = function() {
-                        console.log('Stream error detected');
-                        statusDiv.textContent = 'Status: Stream error';
-                        statusDiv.classList.add('error');
-                    };
-
-                    const source = new EventSource('/status-stream/{{ task_id }}');
-                    
-                    source.onmessage = function(event) {
-                        const data = JSON.parse(event.data);
-                        console.log('Status:', data.status);
-                        statusDiv.textContent = `Status: ${data.status.charAt(0).toUpperCase() + data.status.slice(1)}`;
-                        
-                        if (data.status === 'completed' && data.url) {
-                            streamImg.classList.remove('active');
-                            videoSource.src = data.url;
-                            outputVideo.load();
-                            outputVideo.classList.add('active');
-                            statusDiv.classList.add('completed');
-                            source.close();
-                        } else if (data.status === 'error') {
-                            streamImg.classList.remove('active');
-                            statusDiv.classList.add('error');
-                            source.close();
-                        }
-                    };
-
-                    source.onerror = function() {
-                        console.error('SSE connection error');
-                        statusDiv.textContent = 'Status: Connection error';
-                        statusDiv.classList.add('error');
-                        streamImg.classList.remove('active');
-                        source.close();
-                    };
-                {% endif %}
-            });
-        </script>
+            <div class="right-section">
+                <div class="video-section">
+                    <h2>Processing Result</h2>
+                    <div class="status-container">
+                        <div id="status" role="status" aria-live="polite" aria-busy="false">Status: Waiting for upload...</div>
+                        <button id="pause-resume-btn" aria-label="Pause video processing" disabled>Pause</button>
+                    </div>
+                    <div class="video-container">
+                        <img id="stream" src="" alt="Video Stream">
+                        <video id="output-video" controls>
+                            <source id="video-source" src="" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <img id="processed-image" src="" alt="Processed Image">
+                        <div class="placeholder">Upload a video or image to start detection</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('upload-form');
+            const streamImg = document.getElementById('stream');
+            const outputVideo = document.getElementById('output-video');
+            const videoSource = document.getElementById('video-source');
+            const processedImage = document.getElementById('processed-image');
+            const statusDiv = document.getElementById('status');
+            const placeholder = document.querySelector('.placeholder');
+            const pauseResumeBtn = document.getElementById('pause-resume-btn');
+            let currentTaskId = null;
+            let currentSource = null;
+
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const fileInput = form.querySelector('input[type="file"]');
+                const file = fileInput.files[0];
+                if (!file) {
+                    if (!statusDiv.classList.contains('streaming')) {
+                        statusDiv.textContent = 'Status: Please select a file';
+                        statusDiv.classList.add('error');
+                    }
+                    return;
+                }
+
+                placeholder.style.display = 'none';
+
+                if (!statusDiv.classList.contains('streaming')) {
+                    streamImg.classList.remove('active');
+                    outputVideo.classList.remove('active');
+                    processedImage.classList.remove('active');
+                    pauseResumeBtn.disabled = true;
+                    statusDiv.textContent = 'Status: Uploading...';
+                    statusDiv.classList.remove('error', 'completed', 'streaming');
+                    statusDiv.setAttribute('aria-busy', 'true');
+                }
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const response = await fetch('/', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+
+                    if (data.task_id) {
+
+                        if (currentSource) {
+                            currentSource.close();
+                        }
+
+                        currentTaskId = data.task_id;
+                        streamImg.src = `/stream/${data.task_id}`;
+                        streamImg.classList.add('active');
+                        statusDiv.textContent = 'Status: Processing...';
+                        statusDiv.classList.add('streaming');
+                        pauseResumeBtn.disabled = false;
+                        pauseResumeBtn.textContent = 'Pause';
+                        pauseResumeBtn.classList.remove('paused');
+                        pauseResumeBtn.setAttribute('aria-label', 'Pause video processing');
+
+                        currentSource = new EventSource(`/status-stream/${data.task_id}`);
+                        currentSource.onmessage = function(event) {
+                            const statusData = JSON.parse(event.data);
+                            statusDiv.textContent = `Status: ${statusData.status.charAt(0).toUpperCase() + statusData.status.slice(1)}`;
+
+                            if (statusData.status === 'streaming' || statusData.status === 'paused') {
+                                statusDiv.classList.add('streaming');
+                                statusDiv.classList.remove('completed', 'error');
+                                placeholder.style.display = 'none';
+                            } else if (statusData.status === 'completed' && statusData.url) {
+                                streamImg.classList.remove('active');
+                                videoSource.src = statusData.url;
+                                outputVideo.load();
+                                outputVideo.classList.add('active');
+                                pauseResumeBtn.disabled = true;
+                                statusDiv.classList.remove('streaming');
+                                statusDiv.classList.add('completed');
+                                statusDiv.setAttribute('aria-busy', 'false');
+                                placeholder.style.display = 'none';
+                                currentSource.close();
+                            } else if (statusData.status === 'error') {
+                                streamImg.classList.remove('active');
+                                outputVideo.classList.remove('active');
+                                processedImage.classList.remove('active');
+                                pauseResumeBtn.disabled = true;
+                                statusDiv.classList.remove('streaming');
+                                statusDiv.classList.add('error');
+                                statusDiv.setAttribute('aria-busy', 'false');
+                                placeholder.style.display = 'block';
+                                currentSource.close();
+                            }
+                        };
+
+                        currentSource.onerror = function() {
+                            statusDiv.textContent = 'Status: Connection error';
+                            statusDiv.classList.remove('streaming');
+                            statusDiv.classList.add('error');
+                            statusDiv.setAttribute('aria-busy', 'false');
+                            streamImg.classList.remove('active');
+                            outputVideo.classList.remove('active');
+                            processedImage.classList.remove('active');
+                            pauseResumeBtn.disabled = true;
+                            placeholder.style.display = 'block';
+                            currentSource.close();
+                        };
+
+                        pauseResumeBtn.onclick = async function() {
+                            try {
+                                const response = await fetch(`/toggle-pause/${currentTaskId}`, {
+                                    method: 'POST'
+                                });
+                                const result = await response.json();
+
+                                if (result.status === 'paused') {
+                                    pauseResumeBtn.textContent = 'Resume';
+                                    pauseResumeBtn.classList.add('paused');
+                                    pauseResumeBtn.setAttribute('aria-label', 'Resume video processing');
+                                } else if (result.status === 'resumed') {
+                                    pauseResumeBtn.textContent = 'Pause';
+                                    pauseResumeBtn.classList.remove('paused');
+                                    pauseResumeBtn.setAttribute('aria-label', 'Pause video processing');
+                                } else {
+                                    statusDiv.textContent = `Status: ${result.error}`;
+                                    statusDiv.classList.remove('streaming');
+                                    statusDiv.classList.add('error');
+                                    statusDiv.setAttribute('aria-busy', 'false');
+                                    pauseResumeBtn.disabled = true;
+                                    placeholder.style.display = 'block';
+                                }
+                            } catch (error) {
+                                console.error('Error toggling pause/resume:', error);
+                                statusDiv.textContent = 'Status: Error toggling pause/resume';
+                                statusDiv.classList.remove('streaming');
+                                statusDiv.classList.add('error');
+                                statusDiv.setAttribute('aria-busy', 'false');
+                                pauseResumeBtn.disabled = true;
+                                placeholder.style.display = 'block';
+                            }
+                        };
+                    } else if (data.img_data) {
+                        if (currentSource) {
+                            currentSource.close();
+                        }
+                        processedImage.src = `data:image/png;base64,${data.img_data}`;
+                        processedImage.classList.add('active');
+                        statusDiv.textContent = 'Status: Completed';
+                        statusDiv.classList.remove('streaming');
+                        statusDiv.classList.add('completed');
+                        statusDiv.setAttribute('aria-busy', 'false');
+                        pauseResumeBtn.disabled = true;
+                        placeholder.style.display = 'none';
+                    } else {
+                        throw new Error('Invalid response from server');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    if (!statusDiv.classList.contains('streaming')) {
+                        statusDiv.textContent = 'Status: Upload failed';
+                        statusDiv.classList.remove('streaming');
+                        statusDiv.classList.add('error');
+                        statusDiv.setAttribute('aria-busy', 'false');
+                        streamImg.classList.remove('active');
+                        outputVideo.classList.remove('active');
+                        processedImage.classList.remove('active');
+                        placeholder.style.display = 'block';
+                    }
+                }
+            });
+        });
+    </script>
 </body>
 </html>
