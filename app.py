@@ -10,7 +10,7 @@ import time
 import io
 import warnings
 from uuid import uuid4
-from flask import Flask, Response, render_template, request, jsonify, send_from_directory, session
+from flask import Flask, render_template, request, jsonify, send_from_directory, session
 from flask_session import Session
 from flask_socketio import SocketIO, emit
 from PIL import Image
@@ -40,7 +40,56 @@ MODEL_PATH = str(pathlib.Path('model/pytorch/best_v11.pt').resolve())
 model = YOLO(MODEL_PATH)
 model.fuse()
 
+class_colors = {}
+for cls_id in model.names.keys():
+    class_colors[cls_id] = tuple(np.random.randint(0, 255, 3).tolist())
+
 processing_tasks = {}
+
+def create_heatmap(frame, detections, heatmap_accumulator):
+    h, w = frame.shape[:2]
+    for det in detections:
+        x_min, y_min, x_max, y_max = map(int, det[:4])
+        center_x = (x_min + x_max) // 2
+        center_y = (y_min + y_max) // 2
+        
+        if 0 <= center_y < h and 0 <= center_x < w:
+            heatmap_accumulator[center_y, center_x] += 10
+
+    heatmap_smoothed = cv2.GaussianBlur(heatmap_accumulator, (15, 15), 5)
+    heatmap_normalized = cv2.normalize(heatmap_smoothed, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    heatmap_boosted = np.power(heatmap_normalized / 255.0, 0.5) * 255
+    heatmap_boosted = heatmap_boosted.astype(np.uint8)
+    heatmap_color = cv2.applyColorMap(heatmap_boosted, cv2.COLORMAP_HOT)
+
+    overlay = cv2.addWeighted(frame, 0.6, heatmap_color, 0.4, 0)
+    return overlay
+
+def draw_detections(frame, detections, display_options, class_colors):
+    for det in detections:
+        x_min, y_min, x_max, y_max, conf, cls = det
+        x_min, y_min, x_max, y_max = map(int, [x_min, y_min, x_max, y_max])
+        cls_id = int(cls)
+        cls_name = model.names[cls_id]
+        color = class_colors[cls_id]
+
+        if display_options['bbox']:
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, 3)
+
+        if display_options['class_name'] or display_options['confidence']:
+            label = cls_name if display_options['class_name'] else ""
+            if display_options['confidence']:
+                label += f" {conf:.2f}"
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            label_ymin = max(y_min - 10, label_size[1] + 10)
+            cv2.rectangle(frame, 
+                          (x_min, label_ymin - label_size[1] - 10), 
+                          (x_min + label_size[0] + 10, label_ymin), 
+                          color, cv2.FILLED)
+            cv2.putText(frame, label, 
+                        (x_min + 5, label_ymin - 5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    return frame
 
 def initialize_task(task_id, session_id, sid):
     if task_id not in processing_tasks:
@@ -55,7 +104,14 @@ def initialize_task(task_id, session_id, sid):
             'cap': None,
             'out': None,
             'sid': sid,
-            'roi': None
+            'roi': None,
+            'heatmap_accumulator': None,
+            'show_heatmap': False,
+            'display_options': {
+                'class_name': True,
+                'confidence': False,
+                'bbox': True
+            }
         }
 
 def cleanup_user_tasks(session_id):
@@ -99,11 +155,14 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
     fourcc = cv2.VideoWriter_fourcc(*'avc1')
     out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
+    heatmap_accumulator = np.zeros((frame_height, frame_width), dtype=np.float32)
+
     last_processed_frame = 0
 
     with processing_tasks[task_id]['lock']:
         processing_tasks[task_id]['cap'] = cap
         processing_tasks[task_id]['out'] = out
+        processing_tasks[task_id]['heatmap_accumulator'] = heatmap_accumulator
 
     first_frame = True
 
@@ -120,6 +179,9 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
                 time.sleep(0.1)
                 continue
             roi = processing_tasks[task_id]['roi']
+            show_heatmap = processing_tasks[task_id]['show_heatmap']
+            display_options = processing_tasks[task_id]['display_options']
+            heatmap_accumulator = processing_tasks[task_id]['heatmap_accumulator']
 
         if last_processed_frame > 0:
             cap.set(cv2.CAP_PROP_POS_FRAMES, last_processed_frame)
@@ -142,15 +204,25 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
             roi_frame = frame[y:y+h, x:x+w]
             if roi_frame.size > 0:
                 results = model(roi_frame, verbose=False)
-                roi_processed = results[0].plot()
-                frame_to_send = cv2.resize(roi_processed, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+                detections = results[0].boxes.data.cpu().numpy()
+                frame_to_send_roi = roi_frame.copy()
+                frame_to_send_roi = draw_detections(frame_to_send_roi, detections, display_options, class_colors)
+                frame_to_send = cv2.resize(frame_to_send_roi, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+                if show_heatmap:
+                    for det in detections:
+                        det[:4] = det[:4] * [w / frame_width, h / frame_height, w / frame_width, h / frame_height]
+                        det[:2] += [x, y]
+                        det[2:4] += [x, y]
+                    frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
                 out.write(frame_to_send)
         else:
             results = model(frame, verbose=False)
-            frame = results[0].plot()
+            detections = results[0].boxes.data.cpu().numpy()
+            frame_to_send = draw_detections(frame_to_send, detections, display_options, class_colors)
+            if show_heatmap:
+                frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
+            out.write(frame_to_send)
         
-        out.write(frame_to_send)
-
         ret, buffer = cv2.imencode('.jpg', frame_to_send)
         frame_bytes = base64.b64encode(buffer.tobytes()).decode('utf-8')
         if first_frame:
@@ -201,7 +273,6 @@ def index():
 
         timestamp = datetime.datetime.now().strftime(DATETIME_FORMAT)
         task_id = f"task_{timestamp}"
-        # Lưu socket ID ngay khi khởi tạo task
         initialize_task(task_id, session_id, request.sid if hasattr(request, 'sid') else None)
 
         filename = file.filename.lower()
@@ -237,7 +308,6 @@ def handle_start_stream(data):
     if task_id not in processing_tasks:
         emit('status_update', {'status': 'error', 'url': None, 'error': 'Task not found'})
         return
-    # Cập nhật socket ID cho task
     with processing_tasks[task_id]['lock']:
         processing_tasks[task_id]['sid'] = request.sid
     input_path = os.path.join(TEMP_DIR, f"input_{task_id.replace('task_', '')}.mp4")
@@ -269,6 +339,33 @@ def handle_update_roi(data):
                 return
             if processing_tasks[task_id]['status'] == 'streaming':
                 processing_tasks[task_id]['roi'] = roi
+
+@socketio.on('toggle_heatmap')
+def handle_toggle_heatmap(data):
+    task_id = data['task_id']
+    if task_id not in processing_tasks:
+        emit('status_update', {'status': 'error', 'url': None, 'error': 'Task not found'})
+        return
+    with processing_tasks[task_id]['lock']:
+        if processing_tasks[task_id]['status'] != 'streaming':
+            emit('status_update', {'status': 'error', 'url': None, 'error': 'Task is not streaming'})
+            return
+        processing_tasks[task_id]['show_heatmap'] = not processing_tasks[task_id]['show_heatmap']
+        state = 'on' if processing_tasks[task_id]['show_heatmap'] else 'off'
+        emit('heatmap_status', {'task_id': task_id, 'state': state})
+
+@socketio.on('update_display_options')
+def handle_update_display_options(data):
+    task_id = data['task_id']
+    if task_id not in processing_tasks:
+        emit('status_update', {'status': 'error', 'url': None, 'error': 'Task not found'})
+        return
+    with processing_tasks[task_id]['lock']:
+        if processing_tasks[task_id]['status'] not in ['streaming', 'paused']:
+            emit('status_update', {'status': 'error', 'url': None, 'error': 'Task is not active'})
+            return
+        processing_tasks[task_id]['display_options'] = data['options']
+        emit('display_options_updated', {'task_id': task_id, 'options': data['options']})
 
 @app.route('/temp/<path:filename>')
 def serve_video(filename):

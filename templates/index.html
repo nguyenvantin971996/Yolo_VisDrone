@@ -350,6 +350,60 @@
         .zoom-tooltip.active {
             opacity: 1;
         }
+
+        #toggle-heatmap-btn {
+            padding: 10px 20px;
+            font-size: 1rem;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(74, 144, 226, 0.4);
+        }
+
+        #toggle-heatmap-btn:disabled {
+            background: var(--disabled-color);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        #toggle-heatmap-btn:not(:disabled):hover {
+            background: var(--accent-color);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(243, 156, 18, 0.4);
+        }
+
+        #toggle-heatmap-btn.active {
+            background: var(--secondary-color);
+        }
+
+        #toggle-heatmap-btn.active:not(:disabled):hover {
+            background: var(--accent-color);
+        }
+
+        .display-options {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+        }
+
+        .display-options label {
+            display: flex;
+            align-items: center;
+            font-size: 1rem;
+            color: var(--text-color);
+            cursor: pointer;
+        }
+
+        .display-options input[type="checkbox"] {
+            margin-right: 5px;
+            accent-color: var(--primary-color);
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
@@ -374,6 +428,7 @@
                     <div class="status-container">
                         <div id="status" role="status" aria-live="polite" aria-busy="false">Status: Waiting for upload...</div>
                         <button id="pause-resume-btn" aria-label="Pause video processing" disabled>Pause</button>
+                        <button id="toggle-heatmap-btn" aria-label="Toggle heatmap" disabled>Turn On Heatmap</button>
                     </div>
                     <div class="video-container">
                         <img id="stream" src="" alt="Video Stream">
@@ -385,6 +440,11 @@
                         <img id="processed-image" src="" alt="Processed Image">
                         <div class="placeholder">Upload a video or image to start detection</div>
                         <div id="zoom-tooltip" class="zoom-tooltip"></div>
+                    </div>
+                    <div class="display-options" style="margin-top: 15px; display: flex; gap: 20px; justify-content: center;">
+                        <label><input type="checkbox" id="show-class" checked> Show Class Name</label>
+                        <label><input type="checkbox" id="show-confidence"> Show Confidence</label>
+                        <label><input type="checkbox" id="show-bbox" checked> Show Bounding Box</label>
                     </div>
                 </div>
             </div>
@@ -402,6 +462,10 @@
             const statusDiv = document.getElementById('status');
             const placeholder = document.querySelector('.placeholder');
             const pauseResumeBtn = document.getElementById('pause-resume-btn');
+            const toggleHeatmapBtn = document.getElementById('toggle-heatmap-btn');
+            const showClassCheckbox = document.getElementById('show-class');
+            const showConfidenceCheckbox = document.getElementById('show-confidence');
+            const showBboxCheckbox = document.getElementById('show-bbox');
             const canvas = document.getElementById('roi-canvas');
             const ctx = canvas.getContext('2d');
             let currentTaskId = null;
@@ -554,6 +618,10 @@
                     statusDiv.classList.add('streaming');
                     statusDiv.classList.remove('completed', 'error');
                     pauseResumeBtn.disabled = false;
+                    toggleHeatmapBtn.disabled = false;
+                    showClassCheckbox.disabled = false;
+                    showConfidenceCheckbox.disabled = false;
+                    showBboxCheckbox.disabled = false;
                     pauseResumeBtn.textContent = 'Pause';
                     pauseResumeBtn.classList.remove('paused');
                     pauseResumeBtn.setAttribute('aria-label', 'Pause video processing');
@@ -562,6 +630,10 @@
                     statusDiv.classList.add('streaming');
                     statusDiv.classList.remove('completed', 'error');
                     pauseResumeBtn.disabled = false;
+                    toggleHeatmapBtn.disabled = false;
+                    showClassCheckbox.disabled = false;
+                    showConfidenceCheckbox.disabled = false;
+                    showBboxCheckbox.disabled = false;
                     pauseResumeBtn.textContent = 'Resume';
                     pauseResumeBtn.classList.add('paused');
                     pauseResumeBtn.setAttribute('aria-label', 'Resume video processing');
@@ -574,6 +646,10 @@
                     statusDiv.classList.add('completed');
                     statusDiv.setAttribute('aria-busy', 'false');
                     pauseResumeBtn.disabled = true;
+                    toggleHeatmapBtn.disabled = true;
+                    showClassCheckbox.disabled = true;
+                    showConfidenceCheckbox.disabled = true;
+                    showBboxCheckbox.disabled = true;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     zoomLevel = 1.0;
                     lastRoi = null;
@@ -585,9 +661,40 @@
                     statusDiv.classList.add('error');
                     statusDiv.setAttribute('aria-busy', 'false');
                     pauseResumeBtn.disabled = true;
+                    toggleHeatmapBtn.disabled = true;
+                    showClassCheckbox.disabled = true;
+                    showConfidenceCheckbox.disabled = true;
+                    showBboxCheckbox.disabled = true;
                     placeholder.style.display = 'block';
                 }
             });
+
+            socket.on('heatmap_status', (data) => {
+                if (data.task_id === currentTaskId) {
+                    if (data.state === 'on') {
+                        toggleHeatmapBtn.textContent = 'Turn Off Heatmap';
+                        toggleHeatmapBtn.classList.add('active');
+                    } else {
+                        toggleHeatmapBtn.textContent = 'Turn On Heatmap';
+                        toggleHeatmapBtn.classList.remove('active');
+                    }
+                }
+            });
+
+            function sendDisplayOptions() {
+                if (currentTaskId) {
+                    const options = {
+                        class_name: showClassCheckbox.checked,
+                        confidence: showConfidenceCheckbox.checked,
+                        bbox: showBboxCheckbox.checked
+                    };
+                    socket.emit('update_display_options', { task_id: currentTaskId, options: options });
+                }
+            }
+
+            showClassCheckbox.addEventListener('change', sendDisplayOptions);
+            showConfidenceCheckbox.addEventListener('change', sendDisplayOptions);
+            showBboxCheckbox.addEventListener('change', sendDisplayOptions);
 
             form.addEventListener('submit', async function(e) {
                 e.preventDefault();
@@ -604,6 +711,12 @@
                 outputVideo.classList.remove('active');
                 processedImage.classList.remove('active');
                 pauseResumeBtn.disabled = true;
+                toggleHeatmapBtn.disabled = true;
+                showClassCheckbox.disabled = true;
+                showConfidenceCheckbox.checked = false;
+                showBboxCheckbox.disabled = true;
+                toggleHeatmapBtn.textContent = 'Turn On Heatmap';
+                toggleHeatmapBtn.classList.remove('active');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 zoomLevel = 1.0;
                 lastRoi = null;
@@ -626,6 +739,7 @@
                     if (data.task_id) {
                         currentTaskId = data.task_id;
                         socket.emit('start_stream', { task_id: data.task_id });
+                        sendDisplayOptions();
                     } else if (data.img_data) {
                         processedImage.src = `data:image/png;base64,${data.img_data}`;
                         processedImage.classList.add('active');
@@ -649,6 +763,13 @@
                 if (currentTaskId) {
                     console.log('Toggling pause for task:', currentTaskId);
                     socket.emit('toggle_pause', { task_id: currentTaskId });
+                }
+            };
+
+            toggleHeatmapBtn.onclick = () => {
+                if (currentTaskId) {
+                    console.log('Toggling heatmap for task:', currentTaskId);
+                    socket.emit('toggle_heatmap', { task_id: currentTaskId });
                 }
             };
         });
