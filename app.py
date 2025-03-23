@@ -111,7 +111,8 @@ def initialize_task(task_id, session_id, sid):
                 'class_name': True,
                 'confidence': False,
                 'bbox': True
-            }
+            },
+            'conf_threshold': 0.25
         }
 
 def cleanup_user_tasks(session_id):
@@ -181,6 +182,7 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
             roi = processing_tasks[task_id]['roi']
             show_heatmap = processing_tasks[task_id]['show_heatmap']
             display_options = processing_tasks[task_id]['display_options']
+            conf_threshold = processing_tasks[task_id]['conf_threshold']
             heatmap_accumulator = processing_tasks[task_id]['heatmap_accumulator']
 
         if last_processed_frame > 0:
@@ -191,6 +193,8 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
             break
 
         frame_to_send = frame.copy()
+
+        class_counts = {}
 
         if roi:
             x = int(roi['x'])
@@ -203,7 +207,7 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
             h = min(h, frame_height - y)
             roi_frame = frame[y:y+h, x:x+w]
             if roi_frame.size > 0:
-                results = model(roi_frame, verbose=False)
+                results = model(roi_frame, verbose=False, conf=conf_threshold)
                 detections = results[0].boxes.data.cpu().numpy()
                 frame_to_send_roi = roi_frame.copy()
                 frame_to_send_roi = draw_detections(frame_to_send_roi, detections, display_options, class_colors)
@@ -215,14 +219,24 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
                         det[2:4] += [x, y]
                     frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
                 out.write(frame_to_send)
+                
+                for det in detections:
+                    cls_id = int(det[5])
+                    class_name = model.names[cls_id]
+                    class_counts[class_name] = class_counts.get(class_name, 0) + 1
         else:
-            results = model(frame, verbose=False)
+            results = model(frame, verbose=False, conf=conf_threshold)
             detections = results[0].boxes.data.cpu().numpy()
             frame_to_send = draw_detections(frame_to_send, detections, display_options, class_colors)
             if show_heatmap:
                 frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
             out.write(frame_to_send)
-        
+
+            for det in detections:
+                cls_id = int(det[5])
+                class_name = model.names[cls_id]
+                class_counts[class_name] = class_counts.get(class_name, 0) + 1
+
         ret, buffer = cv2.imencode('.jpg', frame_to_send)
         frame_bytes = base64.b64encode(buffer.tobytes()).decode('utf-8')
         if first_frame:
@@ -236,6 +250,8 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
         else:
             socketio.emit('video_frame', {'task_id': task_id, 'frame': frame_bytes}, room=sid)
 
+        socketio.emit('class_stats', {'task_id': task_id, 'stats': class_counts}, room=sid)
+        
         last_processed_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
     cap.release()
@@ -366,6 +382,20 @@ def handle_update_display_options(data):
             return
         processing_tasks[task_id]['display_options'] = data['options']
         emit('display_options_updated', {'task_id': task_id, 'options': data['options']})
+
+@socketio.on('update_conf_threshold')
+def handle_update_conf_threshold(data):
+    task_id = data['task_id']
+    threshold = data['threshold']
+    if task_id not in processing_tasks:
+        emit('status_update', {'status': 'error', 'url': None, 'error': 'Task not found'})
+        return
+    with processing_tasks[task_id]['lock']:
+        if processing_tasks[task_id]['status'] not in ['streaming', 'paused']:
+            emit('status_update', {'status': 'error', 'url': None, 'error': 'Task is not active'})
+            return
+        processing_tasks[task_id]['conf_threshold'] = threshold
+        emit('conf_threshold_updated', {'task_id': task_id, 'threshold': threshold})
 
 @app.route('/temp/<path:filename>')
 def serve_video(filename):

@@ -127,7 +127,7 @@
 
         .upload-form input[type="file"] {
             padding: 10px;
-            font-size: 1rem;
+            font-size: 1.5rem;
             border: 2px dashed var(--primary-color);
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.8);
@@ -141,7 +141,7 @@
 
         .upload-form input[type="submit"] {
             padding: 10px 20px;
-            font-size: 1rem;
+            font-size: 1.5rem;
             background: var(--primary-color);
             color: white;
             border: none;
@@ -161,7 +161,7 @@
         .video-section h2 {
             color: var(--primary-color);
             margin-bottom: 15px;
-            font-size: 1.5rem;
+            font-size: 2rem;
             font-weight: 600;
             background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
             -webkit-background-clip: text;
@@ -223,7 +223,7 @@
             border-radius: 10px;
             text-align: center;
             font-weight: 500;
-            font-size: 1rem;
+            font-size: 1.5rem;
             transition: all 0.3s ease;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
@@ -248,7 +248,7 @@
 
         #pause-resume-btn {
             padding: 10px 20px;
-            font-size: 1rem;
+            font-size: 1.5rem;
             background: var(--primary-color);
             color: white;
             border: none;
@@ -285,7 +285,7 @@
             color: var(--secondary-color);
             padding: 20px 0;
             font-style: italic;
-            font-size: 1rem;
+            font-size: 1.5rem;
             opacity: 0.7;
             animation: fadeIn 1.5s ease;
         }
@@ -339,7 +339,7 @@
             color: yellow;
             padding: 5px 10px;
             border-radius: 5px;
-            font-size: 1rem;
+            font-size: 1.5rem;
             font-weight: 500;
             opacity: 0;
             transition: opacity 0.3s ease;
@@ -353,7 +353,7 @@
 
         #toggle-heatmap-btn {
             padding: 10px 20px;
-            font-size: 1rem;
+            font-size: 1.5rem;
             background: var(--primary-color);
             color: white;
             border: none;
@@ -385,24 +385,77 @@
             background: var(--accent-color);
         }
 
-        .display-options {
+        .controls-container {
             padding: 10px;
             background: rgba(255, 255, 255, 0.95);
             border-radius: 10px;
             box-shadow: var(--shadow);
-        }
-
-        .display-options label {
             display: flex;
             align-items: center;
-            font-size: 1rem;
-            color: var(--text-color);
-            cursor: pointer;
+            justify-content: center;
+            gap: 20px;
         }
 
-        .display-options input[type="checkbox"] {
-            margin-right: 5px;
-            accent-color: var(--primary-color);
+        .controls-container input[type="checkbox"]:disabled {
+            accent-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .controls-container label:has(input:disabled) {
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .threshold-slider input[type="range"]:disabled {
+            background: #e0e0e0;
+            cursor: not-allowed;
+        }
+
+        .threshold-slider:has(input:disabled) span {
+            color: #999;
+        }
+
+        button:disabled {
+            background: var(--disabled-color);
+            color: #999;
+            cursor: not-allowed;
+            border: 1px solid #ccc;
+        }
+
+        .class-stats {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-family: 'Arial', sans-serif;
+            border: 1px solid #e0e0e0;
+        }
+
+        .stats-label {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            white-space: nowrap;
+        }
+
+        .stats-content {
+            font-size: 1.5rem;
+            color: var(--text-color);
+            flex-grow: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px; 
+        }
+
+        .stats-content span {
+            background: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: 500;
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -413,7 +466,7 @@
         <div class="main-layout">
             <div class="left-section">
                 <div class="title-block">
-                    <h1>Object Detection in Video or Image using YOLOv5</h1>
+                    <h1>Object Detection in Video or Image using YOLOv11</h1>
                 </div>
                 <div class="upload-form">
                     <form id="upload-form" enctype="multipart/form-data" method="post" aria-label="File upload form">
@@ -441,10 +494,18 @@
                         <div class="placeholder">Upload a video or image to start detection</div>
                         <div id="zoom-tooltip" class="zoom-tooltip"></div>
                     </div>
-                    <div class="display-options" style="margin-top: 15px; display: flex; gap: 20px; justify-content: center;">
-                        <label><input type="checkbox" id="show-class" checked> Show Class Name</label>
-                        <label><input type="checkbox" id="show-confidence"> Show Confidence</label>
-                        <label><input type="checkbox" id="show-bbox" checked> Show Bounding Box</label>
+                    <div class="controls-container" style="margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 10px; background: rgba(255, 255, 255, 0.95); border-radius: 10px; box-shadow: var(--shadow);">
+                        <label><input type="checkbox" id="show-class" checked disabled> Show Class Name</label>
+                        <label><input type="checkbox" id="show-confidence" disabled> Show Confidence</label>
+                        <label><input type="checkbox" id="show-bbox" checked disabled> Show Bounding Box</label>
+                        <div class="threshold-slider" style="display: flex; align-items: center; gap: 10px;">
+                            <span>Confidence Threshold: <span id="conf-value">0.25</span></span>
+                            <input type="range" id="conf-threshold" min="0" max="1" step="0.05" value="0.25" disabled style="width: 150px;">
+                        </div>
+                    </div>
+                    <div id="class-stats" class="class-stats" style="margin-top: 15px; padding: 10px; background: rgba(255, 255, 255, 0.95); border-radius: 10px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 15px;">
+                        <span class="stats-label">Object Counts:</span>
+                        <div id="stats-content" class="stats-content">No objects detected yet</div>
                     </div>
                 </div>
             </div>
@@ -466,6 +527,9 @@
             const showClassCheckbox = document.getElementById('show-class');
             const showConfidenceCheckbox = document.getElementById('show-confidence');
             const showBboxCheckbox = document.getElementById('show-bbox');
+            const confThresholdSlider = document.getElementById('conf-threshold');
+            const confValueSpan = document.getElementById('conf-value');
+            const statsContent = document.getElementById('stats-content');
             const canvas = document.getElementById('roi-canvas');
             const ctx = canvas.getContext('2d');
             let currentTaskId = null;
@@ -476,6 +540,26 @@
             let videoWidth = 0, videoHeight = 0;
             let isZooming = false;
             let zoomTimeout;
+
+            confThresholdSlider.addEventListener('input', () => {
+                confValueSpan.textContent = confThresholdSlider.value;
+                if (currentTaskId) {
+                    socket.emit('update_conf_threshold', { task_id: currentTaskId, threshold: parseFloat(confThresholdSlider.value) });
+                }
+            });
+
+            socket.on('class_stats', (data) => {
+                if (data.task_id === currentTaskId) {
+                    if (Object.keys(data.stats).length === 0) {
+                        statsContent.textContent = 'No objects detected';
+                    } else {
+                        const statsText = Object.entries(data.stats)
+                            .map(([className, count]) => `${className}: ${count}`)
+                            .join(', ');
+                        statsContent.textContent = statsText;
+                    }
+                }
+            });
 
             function resizeCanvas() {
                 canvas.width = streamImg.width;
@@ -622,6 +706,7 @@
                     showClassCheckbox.disabled = false;
                     showConfidenceCheckbox.disabled = false;
                     showBboxCheckbox.disabled = false;
+                    confThresholdSlider.disabled = false;
                     pauseResumeBtn.textContent = 'Pause';
                     pauseResumeBtn.classList.remove('paused');
                     pauseResumeBtn.setAttribute('aria-label', 'Pause video processing');
@@ -634,6 +719,7 @@
                     showClassCheckbox.disabled = false;
                     showConfidenceCheckbox.disabled = false;
                     showBboxCheckbox.disabled = false;
+                    confThresholdSlider.disabled = false;
                     pauseResumeBtn.textContent = 'Resume';
                     pauseResumeBtn.classList.add('paused');
                     pauseResumeBtn.setAttribute('aria-label', 'Resume video processing');
@@ -650,6 +736,8 @@
                     showClassCheckbox.disabled = true;
                     showConfidenceCheckbox.disabled = true;
                     showBboxCheckbox.disabled = true;
+                    confThresholdSlider.disabled = true;
+                    statsContent.textContent = 'No objects detected yet';
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     zoomLevel = 1.0;
                     lastRoi = null;
@@ -665,6 +753,8 @@
                     showClassCheckbox.disabled = true;
                     showConfidenceCheckbox.disabled = true;
                     showBboxCheckbox.disabled = true;
+                    confThresholdSlider.disabled = true;
+                    statsContent.textContent = 'No objects detected yet';
                     placeholder.style.display = 'block';
                 }
             });
@@ -713,8 +803,15 @@
                 pauseResumeBtn.disabled = true;
                 toggleHeatmapBtn.disabled = true;
                 showClassCheckbox.disabled = true;
-                showConfidenceCheckbox.checked = false;
+                showConfidenceCheckbox.disabled = true;
                 showBboxCheckbox.disabled = true;
+                showClassCheckbox.checked = true;
+                showConfidenceCheckbox.checked = false;
+                showBboxCheckbox.checked = true;
+                confThresholdSlider.disabled = true;
+                confThresholdSlider.value = 0.25;
+                confValueSpan.textContent = '0.25';
+                statsContent.textContent = 'No objects detected yet';
                 toggleHeatmapBtn.textContent = 'Turn On Heatmap';
                 toggleHeatmapBtn.classList.remove('active');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -740,6 +837,7 @@
                         currentTaskId = data.task_id;
                         socket.emit('start_stream', { task_id: data.task_id });
                         sendDisplayOptions();
+                        socket.emit('update_conf_threshold', { task_id: currentTaskId, threshold: parseFloat(confThresholdSlider.value) });
                     } else if (data.img_data) {
                         processedImage.src = `data:image/png;base64,${data.img_data}`;
                         processedImage.classList.add('active');
