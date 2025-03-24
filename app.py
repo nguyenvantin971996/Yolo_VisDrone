@@ -112,21 +112,45 @@ def initialize_task(task_id, session_id, sid):
                 'confidence': False,
                 'bbox': True
             },
-            'conf_threshold': 0.25
+            'conf_threshold': 0.25,
+            'stop_event': threading.Event(),
+            'thread': None
         }
 
-def cleanup_user_tasks(session_id):
+def cleanup_user_tasks(session_id, emit_status=False):
+    tasks_exist = any(task['session_id'] == session_id for task in processing_tasks.values())
+    if not tasks_exist:
+        if emit_status:
+            emit('status_update', {'status': 'error', 'url': None, 'error': 'No tasks found for this session'})
+        return False
+    
     for task_id in list(processing_tasks.keys()):
         with processing_tasks[task_id]['lock']:
             task = processing_tasks[task_id]
             if task['session_id'] == session_id:
+                task['stop_event'].set()
                 task['stream_active'] = False
-                if task['cap'] and task['cap'].isOpened():
+        
+        if task.get('thread') and task['thread'].is_alive():
+            task['thread'].join()
+
+        with processing_tasks[task_id]['lock']:
+            if task.get('cap') and task['cap'].isOpened():
+                try:
                     task['cap'].release()
+                except Exception as e:
+                    print(f"Error releasing capture: {e}")
+            if task.get('out'):
+                try:
                     task['out'].release()
-                time.sleep(1)
-                delete_task_videos(task_id)
-                del processing_tasks[task_id]
+                except Exception as e:
+                    print(f"Error releasing writer: {e}")
+            delete_task_videos(task_id)
+            del processing_tasks[task_id]
+    
+    if emit_status:
+        emit('status_update', {'status': 'stopped', 'url': None})
+    return True
 
 def delete_task_videos(task_id):
     input_path = os.path.join(TEMP_DIR, f"input_{task_id.replace('task_', '')}.mp4")
@@ -167,7 +191,7 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
 
     first_frame = True
 
-    while True:
+    while not processing_tasks[task_id]['stop_event'].is_set():
         if task_id not in processing_tasks:
             break
         with processing_tasks[task_id]['lock']:
@@ -188,9 +212,19 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
         if last_processed_frame > 0:
             cap.set(cv2.CAP_PROP_POS_FRAMES, last_processed_frame)
 
+        if not processing_tasks[task_id]['stream_active']:
+            break
+
         success, frame = cap.read()
         if not success:
-            break
+            if input_path.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')):
+                time.sleep(1)
+                cap.open(input_path)
+                success, frame = cap.read()
+                if not success:
+                    break
+            else:
+                break
 
         frame_to_send = frame.copy()
 
@@ -254,8 +288,10 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
         
         last_processed_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
-    cap.release()
-    out.release()
+    if cap.isOpened():
+        cap.release()
+    if out:
+        out.release()
     if task_id not in processing_tasks:
         return
     if os.path.exists(output_path):
@@ -278,43 +314,54 @@ def index():
     if 'session_id' not in session:
         session['session_id'] = str(uuid4())
     session_id = session['session_id']
-    cleanup_user_tasks(session_id)
+    cleanup_user_tasks(session_id, emit_status=False)
 
     if request.method == "POST":
-        if "file" not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
-        file = request.files["file"]
-        if not file or file.filename == '':
-            return jsonify({"error": "No file selected"}), 400
+        if "file" in request.files and request.files["file"].filename:
+            file = request.files["file"]
+            if not file or file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
 
-        timestamp = datetime.datetime.now().strftime(DATETIME_FORMAT)
-        task_id = f"task_{timestamp}"
-        initialize_task(task_id, session_id, request.sid if hasattr(request, 'sid') else None)
+            timestamp = datetime.datetime.now().strftime(DATETIME_FORMAT)
+            task_id = f"task_{timestamp}"
+            initialize_task(task_id, session_id, request.sid if hasattr(request, 'sid') else None)
 
-        filename = file.filename.lower()
-        if filename.endswith(('.png', '.jpg', '.jpeg')):
-            try:
-                img_bytes = file.read()
-                img = Image.open(io.BytesIO(img_bytes))
-                img_array = np.array(img)
-                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                results = model(img_array)
-                img_processed = results[0].plot()
-                img_processed_rgb = cv2.cvtColor(img_processed, cv2.COLOR_BGR2RGB)
-                img_pil = Image.fromarray(img_processed_rgb)
-                buffered = io.BytesIO()
-                img_pil.save(buffered, format="PNG")
-                img_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                return jsonify({"img_data": img_data})
-            except Exception as e:
-                return jsonify({"error": f"Error processing image: {str(e)}"}), 500
-        elif filename.endswith(('.mp4', '.avi', '.mov')):
-            input_path = os.path.join(TEMP_DIR, f"input_{timestamp}.mp4")
-            output_path = os.path.join(TEMP_DIR, f"output_{timestamp}.mp4")
-            file.save(input_path)
-            if not os.path.exists(input_path):
-                return jsonify({"error": "File could not be saved"}), 500
-            return jsonify({"task_id": task_id})
+            filename = file.filename.lower()
+            if filename.endswith(('.png', '.jpg', '.jpeg')):
+                try:
+                    img_bytes = file.read()
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img_array = np.array(img)
+                    img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                    results = model(img_array)
+                    img_processed = results[0].plot()
+                    img_processed_rgb = cv2.cvtColor(img_processed, cv2.COLOR_BGR2RGB)
+                    img_pil = Image.fromarray(img_processed_rgb)
+                    buffered = io.BytesIO()
+                    img_pil.save(buffered, format="PNG")
+                    img_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    return jsonify({"img_data": img_data})
+                except Exception as e:
+                    return jsonify({"error": f"Error processing image: {str(e)}"}), 500
+            elif filename.endswith(('.mp4', '.avi', '.mov')):
+                input_path = os.path.join(TEMP_DIR, f"input_{timestamp}.mp4")
+                file.save(input_path)
+                if not os.path.exists(input_path):
+                    return jsonify({"error": "File could not be saved"}), 500
+                return jsonify({"task_id": task_id})
+            
+        elif "stream_url" in request.form and request.form["stream_url"]:
+            stream_url = request.form["stream_url"]
+            if not stream_url:
+                return jsonify({"error": "No stream URL provided"}), 400
+
+            timestamp = datetime.datetime.now().strftime(DATETIME_FORMAT)
+            task_id = f"task_{timestamp}"
+            initialize_task(task_id, session_id, request.sid if hasattr(request, 'sid') else None)
+
+            return jsonify({"task_id": task_id, "stream_url": stream_url})
+        
+        return jsonify({"error": "No file or stream URL provided"}), 400
 
     return render_template("index.html")
 
@@ -326,10 +373,18 @@ def handle_start_stream(data):
         return
     with processing_tasks[task_id]['lock']:
         processing_tasks[task_id]['sid'] = request.sid
+    
     input_path = os.path.join(TEMP_DIR, f"input_{task_id.replace('task_', '')}.mp4")
     output_path = os.path.join(TEMP_DIR, f"output_{task_id.replace('task_', '')}.mp4")
     output_url = f"/temp/{os.path.basename(output_path)}"
-    socketio.start_background_task(process_and_stream_video, input_path, output_path, task_id, output_url, request.sid)
+    
+    if 'stream_url' in data and data['stream_url']:
+        input_path = data['stream_url']
+    
+    thread = socketio.start_background_task(process_and_stream_video, input_path, output_path, task_id, output_url, request.sid)
+    with processing_tasks[task_id]['lock']:
+        processing_tasks[task_id]['thread'] = thread
+
 
 @socketio.on('toggle_pause')
 def handle_toggle_pause(data):
@@ -396,6 +451,14 @@ def handle_update_conf_threshold(data):
             return
         processing_tasks[task_id]['conf_threshold'] = threshold
         emit('conf_threshold_updated', {'task_id': task_id, 'threshold': threshold})
+
+@socketio.on('reset_task')
+def handle_reset_task(data):
+    if 'session_id' not in session:
+        emit('status_update', {'status': 'error', 'url': None, 'error': 'No active session'})
+        return
+    session_id = session['session_id']
+    cleanup_user_tasks(session_id, emit_status=True)
 
 @app.route('/temp/<path:filename>')
 def serve_video(filename):
