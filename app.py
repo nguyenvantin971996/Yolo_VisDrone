@@ -133,8 +133,9 @@ def cleanup_user_tasks(session_id):
                 task['stop_event'].set()
                 task['active'] = False    
             
-            if task['thread'].is_alive():
-                task['thread'].join()
+            if task['thread']:
+                if task['thread'].is_alive():
+                    task['thread'].join()
             if task['cap']:
                 task['cap'].release()
 
