@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const placeholder = document.querySelector('.placeholder');
     const pauseResumeBtn = document.getElementById('pause-resume-btn');
     const toggleHeatmapBtn = document.getElementById('toggle-heatmap-btn');
+    const exportVideoBtn = document.getElementById('export-video-btn');
     const showClassCheckbox = document.getElementById('show-class');
     const showConfidenceCheckbox = document.getElementById('show-confidence');
     const showBboxCheckbox = document.getElementById('show-bbox');
@@ -28,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let zoomTimeout;
 
     confThresholdSlider.addEventListener('input', () => {
-        confValueSpan.textContent = confThresholdSlider.value;
+        confValueSpan.textContent = parseFloat(confThresholdSlider.value).toFixed(2);
         if (currentTaskId) {
             socket.emit('update_conf_threshold', { task_id: currentTaskId, threshold: parseFloat(confThresholdSlider.value) });
         }
@@ -186,9 +187,10 @@ document.addEventListener('DOMContentLoaded', function() {
         statusDiv.textContent = `Status: ${data.status.charAt(0).toUpperCase() + data.status.slice(1)}`;
         if (data.status === 'streaming') {
             statusDiv.classList.add('streaming');
-            statusDiv.classList.remove('completed', 'error', 'stopped');
+            statusDiv.classList.remove('completed', 'error');
             pauseResumeBtn.disabled = false;
             toggleHeatmapBtn.disabled = false;
+            exportVideoBtn.disabled = false;
             showClassCheckbox.disabled = false;
             showConfidenceCheckbox.disabled = false;
             showBboxCheckbox.disabled = false;
@@ -199,9 +201,10 @@ document.addEventListener('DOMContentLoaded', function() {
             updateZoomROI();
         } else if (data.status === 'paused') {
             statusDiv.classList.add('streaming');
-            statusDiv.classList.remove('completed', 'error', 'stopped');
+            statusDiv.classList.remove('completed', 'error');
             pauseResumeBtn.disabled = false;
             toggleHeatmapBtn.disabled = false;
+            exportVideoBtn.disabled = false;
             showClassCheckbox.disabled = false;
             showConfidenceCheckbox.disabled = false;
             showBboxCheckbox.disabled = false;
@@ -214,11 +217,12 @@ document.addEventListener('DOMContentLoaded', function() {
             videoSource.src = data.url;
             outputVideo.load();
             outputVideo.classList.add('active');
-            statusDiv.classList.remove('streaming', 'error', 'stopped');
+            statusDiv.classList.remove('streaming', 'error');
             statusDiv.classList.add('completed');
             statusDiv.setAttribute('aria-busy', 'false');
             pauseResumeBtn.disabled = true;
             toggleHeatmapBtn.disabled = true;
+            exportVideoBtn.disabled = true;
             showClassCheckbox.disabled = true;
             showConfidenceCheckbox.disabled = true;
             showBboxCheckbox.disabled = true;
@@ -231,36 +235,29 @@ document.addEventListener('DOMContentLoaded', function() {
             streamImg.classList.remove('active');
             outputVideo.classList.remove('active');
             processedImage.classList.remove('active');
-            statusDiv.classList.remove('streaming', 'completed', 'stopped');
+            statusDiv.classList.remove('streaming', 'completed');
             statusDiv.classList.add('error');
             statusDiv.setAttribute('aria-busy', 'false');
             pauseResumeBtn.disabled = true;
             toggleHeatmapBtn.disabled = true;
+            exportVideoBtn.disabled = true;
             showClassCheckbox.disabled = true;
             showConfidenceCheckbox.disabled = true;
             showBboxCheckbox.disabled = true;
             confThresholdSlider.disabled = true;
             statsContent.textContent = 'No objects detected yet';
             placeholder.style.display = 'block';
-        } else if (data.status === 'stopped') {
-            streamImg.classList.remove('active');
-            outputVideo.classList.remove('active');
-            processedImage.classList.remove('active');
-            statusDiv.classList.remove('streaming', 'completed', 'error');
-            statusDiv.classList.add('stopped');
-            statusDiv.setAttribute('aria-busy', 'false');
+        } else if (data.status === 'completed' && data.url==null) {
+            statusDiv.textContent = 'Status: The video has been processed!';
+            statusDiv.classList.add('streaming');
+            statusDiv.classList.remove('completed', 'error');
             pauseResumeBtn.disabled = true;
             toggleHeatmapBtn.disabled = true;
+            exportVideoBtn.disabled = false;
             showClassCheckbox.disabled = true;
             showConfidenceCheckbox.disabled = true;
             showBboxCheckbox.disabled = true;
             confThresholdSlider.disabled = true;
-            statsContent.textContent = 'No objects detected yet';
-            placeholder.style.display = 'block';
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            zoomLevel = 1.0;
-            lastRoi = null;
-            currentTaskId = null;
         }
     });
 
@@ -326,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function() {
         lastRoi = null;
         roi = null;
         statusDiv.textContent = 'Status: Initializing...';
-        statusDiv.classList.remove('error', 'completed', 'streaming', 'stopped');
+        statusDiv.classList.remove('error', 'completed', 'streaming');
         statusDiv.setAttribute('aria-busy', 'true');
 
         const formData = new FormData();
@@ -356,7 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 processedImage.src = `data:image/png;base64,${data.img_data}`;
                 processedImage.classList.add('active');
                 statusDiv.textContent = 'Status: Completed';
-                statusDiv.classList.remove('streaming', 'error', 'stopped');
+                statusDiv.classList.remove('streaming', 'error');
                 statusDiv.classList.add('completed');
                 statusDiv.setAttribute('aria-busy', 'false');
                 pauseResumeBtn.disabled = true;
@@ -392,10 +389,11 @@ document.addEventListener('DOMContentLoaded', function() {
         processedImage.classList.remove('active');
         placeholder.style.display = 'block';
         statusDiv.textContent = 'Status: Waiting for upload...';
-        statusDiv.classList.remove('streaming', 'completed', 'error', 'stopped');
+        statusDiv.classList.remove('streaming', 'completed', 'error');
         statusDiv.setAttribute('aria-busy', 'false');
         pauseResumeBtn.disabled = true;
         toggleHeatmapBtn.disabled = true;
+        exportVideoBtn.disabled = true;
         showClassCheckbox.disabled = true;
         showConfidenceCheckbox.disabled = true;
         showBboxCheckbox.disabled = true;
@@ -421,5 +419,17 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Resetting and cleaning all tasks');
         socket.emit('reset_task', {});
         resetToInitialState();
+    };
+
+    exportVideoBtn.onclick = () => {
+        if (currentTaskId) {
+            statusDiv.textContent = 'Status: Exporting video...';
+            console.log('Exporting video for task:', currentTaskId);
+            socket.emit('export_video', { task_id: currentTaskId });
+        } else {
+            console.log('No active task to export');
+            statusDiv.textContent = 'Status: No active task to export';
+            statusDiv.classList.add('error');
+        }
     };
 });

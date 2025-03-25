@@ -96,13 +96,12 @@ def initialize_task(task_id, session_id, sid):
         processing_tasks[task_id] = {
             'status': 'pending',
             'url': None,
-            'stream_active': False,
             'paused': False,
             'lock': threading.Lock(),
             'timestamp': datetime.datetime.now(),
             'session_id': session_id,
             'cap': None,
-            'out': None,
+            'active': False,
             'sid': sid,
             'roi': None,
             'heatmap_accumulator': None,
@@ -114,14 +113,17 @@ def initialize_task(task_id, session_id, sid):
             },
             'conf_threshold': 0.25,
             'stop_event': threading.Event(),
-            'thread': None
+            'thread': None,
+            'processed_frames': []
         }
+def monitor_background_threads():
+    for thread in threading.enumerate():
+        print(thread.name)
+    print("_____________________________________________________")
 
-def cleanup_user_tasks(session_id, emit_status=False):
+def cleanup_user_tasks(session_id):
     tasks_exist = any(task['session_id'] == session_id for task in processing_tasks.values())
     if not tasks_exist:
-        if emit_status:
-            emit('status_update', {'status': 'error', 'url': None, 'error': 'No tasks found for this session'})
         return False
     
     for task_id in list(processing_tasks.keys()):
@@ -129,27 +131,15 @@ def cleanup_user_tasks(session_id, emit_status=False):
             task = processing_tasks[task_id]
             if task['session_id'] == session_id:
                 task['stop_event'].set()
-                task['stream_active'] = False
-        
-        if task.get('thread') and task['thread'].is_alive():
-            task['thread'].join()
+                task['active'] = False    
+            
+            if task['thread'].is_alive():
+                task['thread'].join()
+            if task['cap']:
+                task['cap'].release()
 
-        with processing_tasks[task_id]['lock']:
-            if task.get('cap') and task['cap'].isOpened():
-                try:
-                    task['cap'].release()
-                except Exception as e:
-                    print(f"Error releasing capture: {e}")
-            if task.get('out'):
-                try:
-                    task['out'].release()
-                except Exception as e:
-                    print(f"Error releasing writer: {e}")
             delete_task_videos(task_id)
             del processing_tasks[task_id]
-    
-    if emit_status:
-        emit('status_update', {'status': 'stopped', 'url': None})
     return True
 
 def delete_task_videos(task_id):
@@ -162,42 +152,35 @@ def delete_task_videos(task_id):
             except PermissionError as e:
                 print(e)
 
-def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
+def process_and_stream_video(input_path, task_id, sid):
     with processing_tasks[task_id]['lock']:
-        processing_tasks[task_id].update({'status': 'streaming', 'stream_active': True})
+        processing_tasks[task_id].update({'status': 'streaming'})
         socketio.emit('status_update', {'status': 'streaming', 'url': None}, room=sid)
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         with processing_tasks[task_id]['lock']:
-            processing_tasks[task_id].update({'status': 'error', 'url': None, 'stream_active': False})
+            processing_tasks[task_id].update({'status': 'error', 'url': None})
         socketio.emit('status_update', {'status': 'error', 'url': None}, room=sid)
         return
 
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
-
     heatmap_accumulator = np.zeros((frame_height, frame_width), dtype=np.float32)
 
     last_processed_frame = 0
+    first_frame = True
 
     with processing_tasks[task_id]['lock']:
         processing_tasks[task_id]['cap'] = cap
-        processing_tasks[task_id]['out'] = out
+        processing_tasks[task_id]['active'] = True
         processing_tasks[task_id]['heatmap_accumulator'] = heatmap_accumulator
-
-    first_frame = True
 
     while not processing_tasks[task_id]['stop_event'].is_set():
         if task_id not in processing_tasks:
             break
         with processing_tasks[task_id]['lock']:
             if task_id not in processing_tasks:
-                break
-            if not processing_tasks[task_id]['stream_active']:
                 break
             if processing_tasks[task_id]['paused']:
                 socketio.emit('status_update', {'status': 'paused', 'url': None}, room=sid)
@@ -212,9 +195,6 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
         if last_processed_frame > 0:
             cap.set(cv2.CAP_PROP_POS_FRAMES, last_processed_frame)
 
-        if not processing_tasks[task_id]['stream_active']:
-            break
-
         success, frame = cap.read()
         if not success:
             if input_path.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')):
@@ -227,7 +207,6 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
                 break
 
         frame_to_send = frame.copy()
-
         class_counts = {}
 
         if roi:
@@ -252,8 +231,9 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
                         det[:2] += [x, y]
                         det[2:4] += [x, y]
                     frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
-                out.write(frame_to_send)
                 
+                processing_tasks[task_id]['processed_frames'].append(frame_to_send.copy())
+
                 for det in detections:
                     cls_id = int(det[5])
                     class_name = model.names[cls_id]
@@ -264,7 +244,8 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
             frame_to_send = draw_detections(frame_to_send, detections, display_options, class_colors)
             if show_heatmap:
                 frame_to_send = create_heatmap(frame_to_send, detections, heatmap_accumulator)
-            out.write(frame_to_send)
+            
+            processing_tasks[task_id]['processed_frames'].append(frame_to_send.copy())
 
             for det in detections:
                 cls_id = int(det[5])
@@ -287,34 +268,72 @@ def process_and_stream_video(input_path, output_path, task_id, output_url, sid):
         socketio.emit('class_stats', {'task_id': task_id, 'stats': class_counts}, room=sid)
         
         last_processed_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+    
+    if processing_tasks[task_id]['active']:
+        socketio.emit('status_update', {'status': 'completed', 'url': None})
 
-    if cap.isOpened():
-        cap.release()
-    if out:
-        out.release()
+def save_output_video(task_id, sid=None):
     if task_id not in processing_tasks:
-        return
-    if os.path.exists(output_path):
-        with processing_tasks[task_id]['lock']:
+        return False
+
+    with processing_tasks[task_id]['lock']:
+        processing_tasks[task_id]['stop_event'].set()
+        processing_tasks[task_id]['active'] = False  
+        
+        if processing_tasks[task_id]['thread'].is_alive():
+            processing_tasks[task_id]['thread'].join()
+
+        cap = processing_tasks[task_id]['cap']
+        frames = processing_tasks[task_id]['processed_frames']
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = min(int(cap.get(cv2.CAP_PROP_FPS)), 10)
+        output_path = os.path.join(TEMP_DIR, f"output_{task_id.replace('task_', '')}.mp4")
+        output_url = f"/temp/{os.path.basename(output_path)}"
+
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+        for frame in frames:
+            out.write(frame)
+
+        cap.release()
+        out.release()
+
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             processing_tasks[task_id].update({
                 'status': 'completed',
                 'url': output_url,
-                'stream_active': False,
-                'cap': None,
-                'out': None
+                'processed_frames': []
             })
-        socketio.emit('status_update', {'status': 'completed', 'url': output_url}, room=sid)
-    else:
-        with processing_tasks[task_id]['lock']:
-            processing_tasks[task_id].update({'status': 'error', 'url': None, 'stream_active': False})
-        socketio.emit('status_update', {'status': 'error', 'url': None}, room=sid)
+            if sid:
+                socketio.emit('status_update', {'status': 'completed', 'url': output_url}, room=sid)
+            return
+        else:
+            print(f"Error: Output file {output_path} not created or empty for task {task_id}")
+            processing_tasks[task_id].update({'status': 'error', 'url': None})
+            if sid:
+                socketio.emit('status_update', {'status': 'error', 'url': None, 'error': 'Failed to create output video'}, room=sid)
+            return
+
+@socketio.on('export_video')
+def handle_export_video(data):
+    task_id = data['task_id']
+    if task_id not in processing_tasks:
+        emit('status_update', {'status': 'error', 'url': None, 'error': 'Task not found'})
+        return
+
+    with processing_tasks[task_id]['lock']:
+        if not processing_tasks[task_id]['processed_frames']:
+            emit('status_update', {'status': 'error', 'url': None, 'error': 'No processed frames available'})
+            return
+    save_output_video(task_id, sid=processing_tasks[task_id]['sid'])
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if 'session_id' not in session:
         session['session_id'] = str(uuid4())
     session_id = session['session_id']
-    cleanup_user_tasks(session_id, emit_status=False)
+    cleanup_user_tasks(session_id)
 
     if request.method == "POST":
         if "file" in request.files and request.files["file"].filename:
@@ -375,13 +394,11 @@ def handle_start_stream(data):
         processing_tasks[task_id]['sid'] = request.sid
     
     input_path = os.path.join(TEMP_DIR, f"input_{task_id.replace('task_', '')}.mp4")
-    output_path = os.path.join(TEMP_DIR, f"output_{task_id.replace('task_', '')}.mp4")
-    output_url = f"/temp/{os.path.basename(output_path)}"
     
     if 'stream_url' in data and data['stream_url']:
         input_path = data['stream_url']
     
-    thread = socketio.start_background_task(process_and_stream_video, input_path, output_path, task_id, output_url, request.sid)
+    thread = socketio.start_background_task(process_and_stream_video, input_path, task_id, request.sid)
     with processing_tasks[task_id]['lock']:
         processing_tasks[task_id]['thread'] = thread
 
@@ -458,7 +475,7 @@ def handle_reset_task(data):
         emit('status_update', {'status': 'error', 'url': None, 'error': 'No active session'})
         return
     session_id = session['session_id']
-    cleanup_user_tasks(session_id, emit_status=True)
+    cleanup_user_tasks(session_id)
 
 @app.route('/temp/<path:filename>')
 def serve_video(filename):

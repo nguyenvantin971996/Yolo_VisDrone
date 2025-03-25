@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Object Detection in Video or Image using YOLOv5</title>
+    <title>Object Detection in Video or Image using YOLOv11</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
@@ -12,25 +12,26 @@
     <div class="container">
         <div class="main-layout">
             <div class="left-section">
-                <div class="title-block">
+                <div class="title-block block">
                     <h1>Object Detection in Video or Image using YOLOv11</h1>
                 </div>
-                <div class="upload-form">
+                <div class="upload-form block">
                     <form id="upload-form" enctype="multipart/form-data" method="post" aria-label="File upload form">
                         <input type="text" name="stream-url" placeholder="Enter stream URL (e.g., rtsp://...)" aria-label="Stream URL">
                         <input type="file" name="file" accept=".png,.jpg,.jpeg,.mp4,.avi,.mov" aria-label="Select image or video file">
-                        <input type="submit" value="Detect" aria-label="Start detection">
+                        <input type="submit" value="Detect" class="btn" aria-label="Start detection">
                     </form>
                 </div>
             </div>
             <div class="right-section">
-                <div class="video-section">
+                <div class="video-section block">
                     <h2>Processing Result</h2>
                     <div class="status-container">
                         <div id="status" role="status" aria-live="polite" aria-busy="false">Status: Waiting for upload...</div>
-                        <button id="toggle-heatmap-btn" aria-label="Toggle heatmap" disabled>Turn On Heatmap</button>
-                        <button id="pause-resume-btn" aria-label="Pause video processing" disabled>Pause</button>
-                        <button id="reset-btn" aria-label="Reset to initial state">Reset</button>
+                        <button id="toggle-heatmap-btn" class="btn" aria-label="Toggle heatmap" disabled>Turn On Heatmap</button>
+                        <button id="pause-resume-btn" class="btn" aria-label="Pause video processing" disabled>Pause</button>
+                        <button id="export-video-btn" class="btn" aria-label="Export processed video" disabled>Export Video</button>
+                        <button id="reset-btn" class="btn" aria-label="Reset to initial state">Reset</button>
                     </div>
                     <div class="video-container">
                         <img id="stream" src="" alt="Video Stream">
@@ -43,16 +44,16 @@
                         <div class="placeholder">Upload a video or image to start detection</div>
                         <div id="zoom-tooltip" class="zoom-tooltip"></div>
                     </div>
-                    <div class="controls-container" style="margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 10px; background: rgba(255, 255, 255, 0.95); border-radius: 10px; box-shadow: var(--shadow);">
+                    <div class="controls-container">
                         <label><input type="checkbox" id="show-class" checked disabled> Show Class Name</label>
                         <label><input type="checkbox" id="show-confidence" disabled> Show Confidence</label>
                         <label><input type="checkbox" id="show-bbox" checked disabled> Show Bounding Box</label>
-                        <div class="threshold-slider" style="display: flex; align-items: center; gap: 10px;">
+                        <div class="threshold-slider">
                             <span>Confidence Threshold: <span class="conf-value-container"><span id="conf-value">0.25</span></span></span>
-                            <input type="range" id="conf-threshold" min="0" max="1" step="0.05" value="0.25" disabled style="width: 150px;">
+                            <input type="range" id="conf-threshold" min="0" max="1" step="0.05" value="0.25" disabled>
                         </div>
                     </div>
-                    <div id="class-stats" class="class-stats" style="margin-top: 15px; padding: 10px; background: rgba(255, 255, 255, 0.95); border-radius: 10px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 15px;">
+                    <div id="class-stats" class="class-stats">
                         <span class="stats-label">Object Counts:</span>
                         <div id="stats-content" class="stats-content">No objects detected yet</div>
                     </div>
